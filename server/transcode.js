@@ -239,6 +239,10 @@ function startTranscoding() {
         stdio: ['pipe', 'pipe', 'pipe', 'pipe']
     });
 
+    // Session-local references: handlers of a stopped/replaced ffmpeg process must not touch the current session
+    const proc = ffmpegProcess;
+    const out = outputStream;
+
     // Connect video stream to stdin (pipe:0)
     inputStream.pipe(ffmpegProcess.stdio[0]);
 
@@ -253,6 +257,9 @@ function startTranscoding() {
     let chunkBuffer = Buffer.alloc(0);
 
     ffmpegProcess.stdout.on('data', (chunk) => {
+        // Chunks may still arrive after stopTranscoding() killed the process
+        if (ffmpegProcess !== proc || out.writableEnded) return;
+
         utils.log(`📦 ffmpeg output chunk received - Size: ${chunk.length} bytes`, 'trace');
 
         // Accumulate incoming data
@@ -311,7 +318,7 @@ function startTranscoding() {
                 captureSnapshot(boxType, box);
 
                 // Forward media data to all active streaming clients
-                outputStream.write(box);
+                out.write(box);
             }
         }
     });
@@ -335,6 +342,7 @@ function startTranscoding() {
      */
     ffmpegProcess.on('error', (err) => {
         utils.log(`❌ ffmpeg error: ${err}`, 'error');
+        if (ffmpegProcess !== proc) return;
         currentDevice = 'unknown';
         stopTranscoding();
     });
@@ -346,6 +354,9 @@ function startTranscoding() {
      */
     ffmpegProcess.on('close', (code) => {
         utils.log(`ℹ️ ffmpeg exited with code ${code}`, 'info');
+
+        // A newer transcoding session is already running - leave its state alone
+        if (ffmpegProcess && ffmpegProcess !== proc) return;
 
         // Save final snapshot before cleanup
         if (lastSnapshotBuffer && currentDevice && currentDevice !== 'unknown') {
