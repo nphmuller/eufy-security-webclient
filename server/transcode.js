@@ -230,7 +230,8 @@ function startTranscoding() {
         '-f', 'mp4',                       // MP4 container
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',  // Fragmented MP4
         '-frag_duration', CONFIG.FFMPEG_SHORT_KEYFRAMES ? '500000' : '1000000',  // Fragment duration
-        '-min_frag_duration', CONFIG.FFMPEG_SHORT_KEYFRAMES ? '500000' : '1000000',
+        // No -min_frag_duration: with jittering input timestamps it suppresses the cut at a keyframe right after a
+        // duration cut, so keyframes end up inside fragments (no keyframe fragments for MSE and snapshots)
         '-muxdelay', '0',                  // No mux delay
         '-muxpreload', '0',                // No preload
 
@@ -597,6 +598,7 @@ function saveSnapshotToDisk() {
             '-f', 'mp4',                    // Input format
             '-i', 'pipe:0',                 // Read from stdin
             '-vframes', '1',                // Extract only first frame
+            '-update', '1',                 // Single image file, not an image sequence
             '-pix_fmt', 'yuvj420p',         // Full-range YUV for JPEG
             '-q:v', '2',                    // High quality JPEG (2-5 is best)
             snapshotPath
