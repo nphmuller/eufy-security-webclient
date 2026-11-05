@@ -40,6 +40,10 @@ let lastSnapshotBuffer = null;         // In-memory snapshot buffer
 let segmentCounter = 0;                // Segment counter for keyframe detection
 let segmentSizes = [];                 // Track segment sizes for adaptive threshold
 let largestSegmentSize = 0;            // Largest segment size seen
+let segmentIsKeyframe = null;          // Keyframe flag of the current moof (null = unknown)
+
+const VIDEO_TRACK_ID = 1;              // Video is mapped first in the ffmpeg arguments
+const SAMPLE_IS_NON_SYNC = 0x00010000; // sample_is_non_sync_sample bit of the ISO BMFF sample flags
 
 function initTranscode() {
     CONFIG = utils.loadConfig();
@@ -195,8 +199,8 @@ function startTranscoding() {
         // Video input configuration (pipe:0 = stdin)
         ...(useVaapi ? vaapiInputArgs : []),
         '-f', (videoMetadata.videoCodec === 'H264' ? 'h264' : 'hevc'),  // Input format
-        '-flags', '+bsf_extract',          // Extract bitstream
-        '-fflags', 'nobuffer+discardcorrupt',  // Low latency flags
+        // No 'nobuffer' here: it drops the packets read while probing, i.e. the leading IDR (HEVC "Could not find ref" errors)
+        '-fflags', 'discardcorrupt',       // Drop corrupt packets
         '-flags', 'low_delay',             // Minimize buffering
         '-probesize', '32',                // Minimal probing for faster startup
         '-analyzeduration', '0',           // No analysis delay
@@ -361,6 +365,8 @@ function startTranscoding() {
         // Save final snapshot before cleanup
         if (lastSnapshotBuffer && currentDevice && currentDevice !== 'unknown') {
             saveSnapshotToDisk();
+        } else {
+            utils.log(`⚠️ No snapshot saved - ${lastSnapshotBuffer ? 'no device' : 'no keyframe segment captured'}`, 'warn');
         }
 
         // Reset state
@@ -444,6 +450,7 @@ function captureSnapshot(boxType, box) {
     if (boxType === 'moof') {
         // Start collecting new segment (moof header)
         lastKeyframeSegment = box;
+        segmentIsKeyframe = isKeyframeMoof(box);
         segmentCounter++;
     } else if (boxType === 'mdat' && lastKeyframeSegment) {
         // Complete segment by adding mdat (media data)
@@ -466,7 +473,10 @@ function captureSnapshot(boxType, box) {
          * After calibration: Use 70% of largest segment as threshold
          */
         let isLikelyKeyframe = false;
-        if (segmentSizes.length < 5) {
+        if (segmentIsKeyframe !== null) {
+            // Sample flags from the moof are authoritative
+            isLikelyKeyframe = segmentIsKeyframe;
+        } else if (segmentSizes.length < 5) {
             // Initial phase: simple threshold (300KB minimum)
             isLikelyKeyframe = segmentSize > 300000;
         } else {
@@ -475,15 +485,83 @@ function captureSnapshot(boxType, box) {
             isLikelyKeyframe = segmentSize >= threshold;
         }
 
+        const detection = segmentIsKeyframe !== null ? 'sample flags'
+            : `threshold: ${segmentSizes.length < 5 ? '300KB' : Math.round(largestSegmentSize * 0.7 / 1024) + 'KB'}`;
+
         if (isLikelyKeyframe) {
-            utils.log(`🔑 Keyframe segment #${segmentCounter}: ${segmentSize} bytes (threshold: ${segmentSizes.length < 5 ? '300KB' : Math.round(largestSegmentSize * 0.7 / 1024) + 'KB'})`, 'debug');
+            utils.log(`🔑 Keyframe segment #${segmentCounter}: ${segmentSize} bytes (${detection})`, 'debug');
 
             // Store keyframe segment with init segment for complete playable snapshot
             lastSnapshotBuffer = Buffer.concat([initSegment, lastKeyframeSegment]);
         } else {
-            utils.log(`⏭️ Skipping small segment #${segmentCounter}: ${segmentSize} bytes`, 'debug');
+            utils.log(`⏭️ Skipping non-keyframe segment #${segmentCounter}: ${segmentSize} bytes (${detection})`, 'debug');
         }
     }
+}
+
+/**
+ * Is Keyframe Moof
+ * Reads the sample flags of the first video sample in a moof box (ISO BMFF tfhd/trun)
+ * @param {Buffer} moof - Complete moof box
+ * @returns {boolean|null} true if the fragment starts with a sync sample, null if undeterminable
+ */
+function isKeyframeMoof(moof) {
+    try {
+        let offset = 8;
+        while (offset + 8 <= moof.length) {
+            const size = moof.readUInt32BE(offset);
+            if (size < 8 || offset + size > moof.length) break;
+            if (moof.toString('ascii', offset + 4, offset + 8) === 'traf') {
+                const result = parseVideoTraf(moof, offset + 8, offset + size);
+                if (result !== undefined) return result;
+            }
+            offset += size;
+        }
+    } catch (e) {
+        utils.log(`⚠️ moof parse error: ${e}`, 'debug');
+    }
+    return null;
+}
+
+/**
+ * Parse Video Traf
+ * @returns {boolean|null|undefined} keyframe flag, null if undeterminable, undefined if not the video track
+ */
+function parseVideoTraf(buf, start, end) {
+    let defaultFlags = null;
+    let offset = start;
+    while (offset + 8 <= end) {
+        const size = buf.readUInt32BE(offset);
+        if (size < 8 || offset + size > end) break;
+        const type = buf.toString('ascii', offset + 4, offset + 8);
+        const flags = buf.readUInt32BE(offset + 8) & 0xffffff;
+        let pos = offset + 12;
+
+        if (type === 'tfhd') {
+            if (buf.readUInt32BE(pos) !== VIDEO_TRACK_ID) return undefined;
+            pos += 4;
+            if (flags & 0x01) pos += 8;    // base_data_offset
+            if (flags & 0x02) pos += 4;    // sample_description_index
+            if (flags & 0x08) pos += 4;    // default_sample_duration
+            if (flags & 0x10) pos += 4;    // default_sample_size
+            if (flags & 0x20) defaultFlags = buf.readUInt32BE(pos);
+        } else if (type === 'trun') {
+            const sampleCount = buf.readUInt32BE(pos);
+            pos += 4;
+            if (flags & 0x01) pos += 4;    // data_offset
+            let sampleFlags = defaultFlags;
+            if (flags & 0x04) {
+                sampleFlags = buf.readUInt32BE(pos);   // first_sample_flags
+            } else if ((flags & 0x400) && sampleCount > 0) {
+                if (flags & 0x100) pos += 4;           // sample_duration
+                if (flags & 0x200) pos += 4;           // sample_size
+                sampleFlags = buf.readUInt32BE(pos);   // sample_flags of first sample
+            }
+            return sampleFlags === null ? null : !(sampleFlags & SAMPLE_IS_NON_SYNC);
+        }
+        offset += size;
+    }
+    return null;
 }
 
 /**
