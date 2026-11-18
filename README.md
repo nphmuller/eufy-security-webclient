@@ -69,6 +69,13 @@ eufy-security-webclient/
 
 ### 1. Docker (Recommended)
 
+#### Published image (nphmuller fork)
+
+Pushes to `master` publish `ghcr.io/nphmuller/eufy-security-webclient:latest`
+and a commit-specific tag, `sha-<full-commit-sha>`. If the GHCR package is
+private, sign in to `ghcr.io` with a token that has `read:packages` before
+pulling.
+
 #### Build and Run with Docker Compose
 ```sh
 docker-compose up --build
