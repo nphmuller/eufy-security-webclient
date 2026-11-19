@@ -28,6 +28,7 @@ let fetchController = null;         // AbortController for fetch cancellation
 let isStreaming = false;            // True if stream is active
 let reconnectTimeout = null;        // Timeout handle for reconnection attempts
 let connectionCheckInterval = null; // Interval handle for connection health checks
+const streamMimeType = 'video/mp4; codecs="avc1.64001f, mp4a.40.2"';
 
 // ============================================================================
 // Status and Error Handlers
@@ -133,37 +134,46 @@ function videoStartStream(server, deviceSerial) {
     // Prevent starting multiple streams
     if (isStreaming) return;
 
+    const mediaSourceType = [window.MediaSource, window.ManagedMediaSource]
+        .find(type => type?.isTypeSupported(streamMimeType));
+    if (!mediaSourceType) {
+        videoOnStartFailed('This browser does not support the live video format.');
+        return;
+    }
+
     videoSetStatus('Connecting...', 'connecting');
     isStreaming = true;
     videoUpdateButtons(true);
 
-    // Initialize Media Source Extensions (MSE)
-    mediaSource = new MediaSource();
-    video.src = URL.createObjectURL(mediaSource);
-
-    mediaSource.addEventListener('sourceopen', async () => {
-        try {
-            // Create SourceBuffer for H.264 video + AAC audio
-            // Codec string: avc1.64001f = H.264 High Profile Level 3.1
-            //               mp4a.40.2 = AAC-LC audio
-            sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.64001f, mp4a.40.2"');
-            sourceBuffer.mode = 'sequence';  // Sequential timestamp mode for live streaming
-
-            // Set default playback rate (1.0 = real-time)
-            video.playbackRate = 1.0;
-
-            videoSetStatus('Stream running', 'connected');
-            videoFetchStream(server, deviceSerial);
-        } catch (e) {
-            videoSetStatus('Error: ' + e.message, 'disconnected');
-            videoShowError('SourceBuffer error: ' + e.message);
-            console.error('SourceBuffer error:', e);
-            videoStopStream();
+    const activeVideo = video;
+    try {
+        if (mediaSourceType === window.ManagedMediaSource) {
+            // WebKit requires an AirPlay alternative or disabled remote playback.
+            activeVideo.disableRemotePlayback = true;
+            // Allow inline autoplay; the viewer can unmute via the video controls.
+            activeVideo.muted = true;
         }
-    });
-
-    // Start periodic connection health check
-    videoStartConnectionCheck();
+        mediaSource = new mediaSourceType();
+        const activeSource = mediaSource;
+        activeSource.addEventListener('sourceopen', () => {
+            if (!isStreaming || mediaSource !== activeSource) return;
+            try {
+                sourceBuffer = activeSource.addSourceBuffer(streamMimeType);
+                sourceBuffer.mode = 'sequence';  // Sequential timestamps for live streaming
+                activeVideo.playbackRate = 1.0;
+                videoSetStatus('Stream running', 'connected');
+                videoFetchStream(server, deviceSerial);
+            } catch (e) {
+                console.error('SourceBuffer error:', e);
+                videoOnStartFailed('SourceBuffer error: ' + e.message);
+            }
+        }, { once: true });
+        activeVideo.src = URL.createObjectURL(activeSource);
+        videoStartConnectionCheck();
+    } catch (e) {
+        console.error('Media source setup error:', e);
+        videoOnStartFailed('Could not initialize live video: ' + e.message);
+    }
 }
 
 /**

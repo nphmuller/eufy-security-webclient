@@ -746,6 +746,7 @@ function uiUpdateDeviceVideo() {
     video.id = 'device-video-video';
     video.controls = true;
     video.autoplay = true;
+    video.playsInline = true;
 
     // Create buffer size display
     const p = document.getElementById('toolbar-text')
