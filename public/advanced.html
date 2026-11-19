@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Eufy Security Web Client – Advanced</title>
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/styles.css">
+    <link id="theme-link" rel="stylesheet" href="/css/dark-theme.css">
+    <!-- Scripts -->
+    <script src="/js/theme-switcher.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/ui-deviceproperties.js"></script>
+    <script src="/js/ws-client.js"></script>
+    <script src="/js/ui-events.js"></script>
+    <script src="/js/ui-debug.js"></script>
+    <script src="/js/video.js"></script>
+</head>
+
+<body>
+    <div class="header-bar">
+        <h1><img src="/favicon.ico" alt="Eufy Security Logo">Eufy Security Web Client</h1>
+        <div class="header-actions">
+            <a href="/">Live view</a>
+            <button id="notification-btn">Activate Notifications</button>
+            <button id="config-btn" title="Configuration">⚙</button>
+            <button id="theme-toggle-btn" title="Switch theme">🔆</button>
+            <button id="connect-btn" class="connect" title="Connect">⏻</button>
+        </div>
+    </div>
+    <div class="container">
+        <aside class="sidebar">
+            <div id="device-select-container">
+                <label for="device-select">Select device:</label>
+                <div id="device-select-row">
+                    <select id="device-select"></select>
+                    <button id="device-update-btn" title="Refresh device">&#10227</button>
+                </div>
+            </div>
+            <div id="device-info"></div>
+        </aside>
+        <main class="main-content" data-view="live">
+            <div id="device-toolbar">
+                <button id="device-video-btn" class="connect" hidden>Start Video</button>
+            </div>
+            <div id="device-content">
+                <div id="device-picture"></div>
+                <div id="events-panel">
+                    <div id="events-nav">
+                        <button id="events-prev7" title="7 days back">&#8249;&#8249; 7</button>
+                        <button id="events-prev" title="Previous day">&#8249;</button>
+                        <span id="events-date"></span>
+                        <button id="events-next" title="Next day">&#8250;</button>
+                        <button id="events-next7" title="7 days forward">7 &#8250;&#8250;</button>
+                        <button id="events-today" title="Today">Today</button>
+                        <button id="events-reload" title="Reload">&#10227;</button>
+                    </div>
+                    <div id="events-list"></div>
+                </div>
+                <div id="debug-panel">
+                    <section class="debug-p2p">
+                        <div class="debug-log-header">
+                            <h3>P2P connections</h3>
+                            <button id="debug-p2p-refresh" title="Reload">&#10227;</button>
+                        </div>
+                        <table id="debug-p2p-table">
+                            <thead><tr><th>Station</th><th>Path</th><th>Since</th><th>Detail</th></tr></thead>
+                            <tbody><tr><td colspan="4">No P2P session yet</td></tr></tbody>
+                        </table>
+                    </section>
+                    <section class="debug-log">
+                        <div class="debug-log-header">
+                            <h3>Client</h3>
+                            <button id="debug-client-copy" title="Copy to clipboard">Copy</button>
+                            <button id="debug-client-clear" title="Clear">Clear</button>
+                        </div>
+                        <div id="debug-client-log" class="debug-log-lines"></div>
+                    </section>
+                    <section class="debug-log">
+                        <div class="debug-log-header">
+                            <h3>Server</h3>
+                            <select id="debug-server-filter" title="Show entries up to this level">
+                                <option value="0">error</option>
+                                <option value="1">warn</option>
+                                <option value="2">info</option>
+                                <option value="3">debug</option>
+                                <option value="4" selected>trace</option>
+                            </select>
+                            <button id="debug-server-clear" title="Clear view">Clear</button>
+                            <button id="debug-server-download" title="Download server log">Download</button>
+                        </div>
+                        <div id="debug-server-log" class="debug-log-lines"></div>
+                    </section>
+                </div>
+            </div>
+            <div class="status-bar">
+                <div>
+                    <span id="connection-status">Not connected</span>
+                    &nbsp;-&nbsp;
+                    <span id="station-sn"></span>
+                    <span id="station-version"></span>
+                </div>
+                <span id="ws-version"></span>
+            </div>
+        </main>
+    </div>
+
+    <div id="config-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Configuration</h2>
+                <span class="modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <h3>Eufy Account</h3>
+                <div class="config-field">
+                    <label for="config-eufy-username">Username:</label>
+                    <input type="text" id="config-eufy-username" placeholder="email@example.com">
+                </div>
+                <div class="config-field">
+                    <label for="config-eufy-password">Password:</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="config-eufy-password" placeholder="password">
+                        <button type="button" class="password-toggle" id="password-toggle-btn"
+                            title="Show/Hide password">👁</button>
+                    </div>
+                </div>
+                <div class="config-field">
+                    <label for="config-eufy-country">Country:</label>
+                    <input type="text" id="config-eufy-country" placeholder="DE" maxlength="2">
+                </div>
+
+                <h3>Transcoding Settings</h3>
+                <div class="config-field">
+                    <label for="config-video-scale">Video Scale:</label>
+                    <input type="text" id="config-video-scale" placeholder="1280:-2">
+                </div>
+                <div class="config-field">
+                    <label for="config-transcoding-preset">Transcoding Preset:</label>
+                    <select id="config-transcoding-preset">
+                        <option value="ultrafast">ultrafast</option>
+                        <option value="superfast">superfast</option>
+                        <option value="veryfast">veryfast</option>
+                        <option value="faster">faster</option>
+                        <option value="fast">fast</option>
+                        <option value="medium">medium</option>
+                        <option value="slow">slow</option>
+                        <option value="slower">slower</option>
+                        <option value="veryslow">veryslow</option>
+                    </select>
+                </div>
+                <div class="config-field">
+                    <label for="config-transcoding-crf">Transcoding CRF:</label>
+                    <input type="number" id="config-transcoding-crf" min="0" max="51" placeholder="23">
+                </div>
+                <div class="config-field">
+                    <label for="config-ffmpeg-threads">FFmpeg Threads:</label>
+                    <input type="number" id="config-ffmpeg-threads" min="1" max="32" placeholder="4">
+                </div>
+                <div class="config-field">
+                    <label for="config-short-keyframes">
+                        <input type="checkbox" id="config-short-keyframes">
+                        Short Keyframes
+                    </label>
+                </div>
+                <div class="config-field">
+                    <label for="config-hwaccel">Hardware Acceleration:</label>
+                    <select id="config-hwaccel">
+                        <option value="none">none (software)</option>
+                        <option value="vaapi">VAAPI (Intel GPU)</option>
+                    </select>
+                </div>
+
+                <h3>Debugging</h3>
+                <div class="config-field">
+                    <label for="config-debug-mode">
+                        <input type="checkbox" id="config-debug-mode">
+                        Show debug tab in this browser
+                    </label>
+                </div>
+                <div class="config-row">
+                <div class="config-field">
+                    <label for="config-log-level">Server Log Level:</label>
+                    <select id="config-log-level">
+                        <option value="0">error</option>
+                        <option value="1">warn</option>
+                        <option value="2">info</option>
+                        <option value="3">debug</option>
+                        <option value="4">trace</option>
+                    </select>
+                </div>
+                <div class="config-field">
+                    <label for="config-ffmpeg-log-level">FFmpeg Log Level:</label>
+                    <select id="config-ffmpeg-log-level">
+                        <option value="quiet">quiet</option>
+                        <option value="panic">panic</option>
+                        <option value="fatal">fatal</option>
+                        <option value="error">error</option>
+                        <option value="warning">warning</option>
+                        <option value="info">info</option>
+                        <option value="verbose">verbose</option>
+                        <option value="debug">debug</option>
+                        <option value="trace">trace</option>
+                    </select>
+                </div>
+                <div class="config-field">
+                    <label for="config-sdk-log-level">Eufy SDK Log Level:</label>
+                    <select id="config-sdk-log-level">
+                        <option value="off">off</option>
+                        <option value="error">error</option>
+                        <option value="warn">warn</option>
+                        <option value="info">info</option>
+                        <option value="debug">debug</option>
+                    </select>
+                </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="config-save-btn">Save</button>
+                <button id="config-cancel-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="event-popup" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="event-popup-title"></h2>
+                <span class="modal-close" id="event-popup-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="event-popup-view">
+                    <button id="event-popup-prev" title="Previous event (arrow left)">&#8249;</button>
+                    <img id="event-popup-image" alt="">
+                    <button id="event-popup-next" title="Next event (arrow right)">&#8250;</button>
+                </div>
+                <div id="event-popup-crops"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="login-title">Eufy Login</h2>
+            </div>
+            <div class="modal-body">
+                <p id="login-text"></p>
+                <img id="login-captcha" alt="Captcha" style="display: none; max-width: 100%; margin-bottom: 1em;">
+                <div class="config-field">
+                    <input type="text" id="login-input" autocomplete="off">
+                </div>
+                <p id="login-error" style="color: red;"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="login-submit-btn">Submit</button>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

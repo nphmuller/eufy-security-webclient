@@ -27,7 +27,7 @@ function themeApply(theme) {
     if (!themes.includes(theme)) {
         theme = 'dark';
     }
-    themeLink.href = `css/${theme}-theme.css`;
+    themeLink.href = `/css/${theme}-theme.css`;
     localStorage.setItem(localStorageKeySelectedTheme, theme);
     themeUpdateButton(theme);
 }

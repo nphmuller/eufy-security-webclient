@@ -186,7 +186,14 @@ Tested with a Celeron N3150 (Braswell, i965 driver): `VIDEO_SCALE` `1152:-2` (ha
 ## Usage
 
 ### Web Interface
-1. Open the web client in your browser (default: [http://localhost:3001](http://localhost:3001))
+
+Open the [main page](http://localhost:3001) for **Start Live View** and **Stop Live View**.
+If your account has more than one camera, choose one from the camera selector.
+No stream starts until you click the button.
+
+Open [Advanced](http://localhost:3001/advanced) for initial login, settings, events, and diagnostics:
+
+1. Open the Advanced page in your browser.
 2. Select a device from the dropdown menu in the sidebar
 3. View detailed device properties in collapsible, grouped sections:
    - Click section headers to expand/collapse property groups

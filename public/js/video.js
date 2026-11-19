@@ -103,18 +103,19 @@ function videoUpdateButtons(streaming) {
  * 
  * @param {string} server - Transcode server base URL
  * @param {string} deviceSerial - Device serial number (alphanumeric)
+ * @param {boolean} reconnectOnEnd - Restart automatically when the stream ends
  */
-function videoStartStream(server, deviceSerial) {
+function videoStartStream(server, deviceSerial, reconnectOnEnd = true) {
     video = document.getElementById('device-video-video');
 
     // Handle video element errors (decoder failures, format issues, etc.)
-    video.addEventListener('error', (e) => {
+    video.onerror = (e) => {
         console.error('Video error:', e);
         if (isStreaming) {
             videoShowError('A video error occurred');
             videoStopStream();
         }
-    });
+    };
 
     bufferSpan = document.getElementById('device-video-buffer');
 
@@ -162,7 +163,7 @@ function videoStartStream(server, deviceSerial) {
                 sourceBuffer.mode = 'sequence';  // Sequential timestamps for live streaming
                 activeVideo.playbackRate = 1.0;
                 videoSetStatus('Stream running', 'connected');
-                videoFetchStream(server, deviceSerial);
+                videoFetchStream(server, deviceSerial, reconnectOnEnd);
             } catch (e) {
                 console.error('SourceBuffer error:', e);
                 videoOnStartFailed('SourceBuffer error: ' + e.message);
@@ -193,15 +194,17 @@ function videoStartStream(server, deviceSerial) {
  * 
  * @param {string} server - Transcode server base URL
  * @param {string} deviceSerial - Device serial number
+ * @param {boolean} reconnectOnEnd - Restart automatically when the stream ends
  */
-async function videoFetchStream(server, deviceSerial) {
-    fetchController = new AbortController();
+async function videoFetchStream(server, deviceSerial, reconnectOnEnd) {
+    const controller = new AbortController();
+    fetchController = controller;
     let lastDataTime = Date.now();
 
     try {
         // Fetch fMP4 stream with abort signal for cancellation
         const response = await fetch(`${server}/${deviceSerial}.mp4`, {
-            signal: fetchController.signal
+            signal: controller.signal
         });
 
         // Handle HTTP errors
@@ -222,8 +225,9 @@ async function videoFetchStream(server, deviceSerial) {
         const reader = response.body.getReader();
 
         // Read stream chunks continuously
-        while (isStreaming) {
+        while (isStreaming && !controller.signal.aborted) {
             const { done, value } = await reader.read();
+            if (controller.signal.aborted) break;
 
             // Stream ended by server
             if (done) {
@@ -231,6 +235,10 @@ async function videoFetchStream(server, deviceSerial) {
 
                 // If still streaming flag is true, it means user didn't stop it
                 if (isStreaming) {
+                    if (!reconnectOnEnd) {
+                        videoOnStartFailed('Live video ended. Start it again to reconnect.');
+                        break;
+                    }
                     videoSetStatus('Reconnecting...', 'connecting');
                     videoShowError('Stream restarting...');
 
@@ -301,7 +309,7 @@ async function videoFetchStream(server, deviceSerial) {
         }
     } catch (e) {
         // Ignore AbortError (triggered by manual stop)
-        if (e.name !== 'AbortError') {
+        if (e.name !== 'AbortError' && !controller.signal.aborted) {
             videoSetStatus('Connection error', 'disconnected');
             videoShowError('Error: ' + e.message);
             console.error('Fetch error:', e);

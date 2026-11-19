@@ -421,6 +421,11 @@ function initRestServer() {
         process.exit(0);
     });
 
+    app.get('/advanced', (req, res) => {
+        res.set('Cache-Control', 'no-cache');
+        res.sendFile(path.join(STATIC_DIR, 'advanced.html'));
+    });
+
     // Serve static files (HTML, CSS, JS) for the web UI
     app.use(express.static(STATIC_DIR, {
         index: 'index.html',

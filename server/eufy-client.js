@@ -132,6 +132,7 @@ function getLoginState() {
 async function connect(eufyConfig) {
     try {
         utils.log('Initializing Eufy Security Client...', 'info');
+        registerDeviceListHandler();
 
         // Prevent duplicate connections
         if (eufyClient && isConnected()) {
@@ -745,23 +746,10 @@ async function stopStreamForDevice(serialNumber) {
     utils.log(`⏹️ Livestream stop request sent for device: ${serialNumber}`, 'info');
 }
 
-/**
- * Register WebSocket Handlers
- * Registers all WebSocket API command handlers for client communication
- * Prevents duplicate registration
- */
-function registerWebSocketHandlers() {
-    // Prevent duplicate handler registration
-    if (wsEvnentHandlersRegistered) {
-        return;
-    }
-
-    /**
-     * start_listening Command
-     * Returns current system state with stations, devices and login state.
-     * Stays successful while login is pending so the UI can show the captcha / 2FA dialog.
-     */
+// The viewer needs login state even before an Eufy account has been configured.
+function registerDeviceListHandler() {
     wsApi.registerMessageHandler('start_listening', (message, ws) => {
+        const serials = getSortedDeviceSerials();
         return {
             type: 'result',
             messageId: 'start_listening',
@@ -773,12 +761,22 @@ function registerWebSocketHandlers() {
                     },
                     login: getLoginState(),
                     stations: Array.from(stations),
-                    devices: getSortedDeviceSerials(),
+                    devices: serials,
+                    cameras: serials.filter(sn => devices.get(sn)?.camera?.()),
                     deviceNames: getDeviceNames()
                 }
             }
         };
     });
+}
+
+/**
+ * Register WebSocket handlers that need an initialized SDK.
+ */
+function registerWebSocketHandlers() {
+    if (wsEvnentHandlersRegistered) {
+        return;
+    }
 
     /**
      * driver.set_captcha / driver.set_verify_code Commands

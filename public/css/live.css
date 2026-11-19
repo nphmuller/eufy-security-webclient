@@ -1,0 +1,104 @@
+:root {
+    color-scheme: dark;
+    font-family: system-ui, sans-serif;
+    background: #101317;
+    color: #f4f6fa;
+}
+
+body {
+    margin: 0;
+    padding: 1rem;
+}
+
+.live {
+    max-width: 48rem;
+    margin: 1rem auto;
+}
+
+.live header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+h1 {
+    margin: 0;
+    font-size: clamp(1.4rem, 4vw, 2rem);
+}
+
+a { color: #a0cfff; }
+
+#camera-choice {
+    margin-bottom: 1rem;
+}
+
+select, button {
+    font: inherit;
+    min-height: 44px;
+}
+
+select { max-width: 100%; }
+
+.viewer {
+    background: #080a0d;
+    border: 1px solid #303640;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    position: relative;
+}
+
+.placeholder {
+    display: grid;
+    place-items: center;
+    margin: 0;
+    min-height: 10rem;
+    aspect-ratio: 16 / 9;
+    padding: 1rem;
+    box-sizing: border-box;
+    color: #c1c8d3;
+    text-align: center;
+}
+
+.placeholder[hidden] { display: none; }
+
+video {
+    width: 100%;
+    vertical-align: middle;
+    aspect-ratio: 16 / 9;
+    max-height: 65vh;
+    object-fit: contain;
+}
+
+#device-video-errorMessage {
+    display: none;
+    margin: 0;
+    padding: 0.75rem 1rem;
+    background: #381d23;
+    color: #ffd6db;
+}
+
+#device-video-errorMessage.visible { display: block; }
+
+#device-video-btn {
+    width: 100%;
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: #a0cfff;
+    color: #0d2238;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+#device-video-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+#live-status {
+    text-align: center;
+    color: #c1c8d3;
+}
