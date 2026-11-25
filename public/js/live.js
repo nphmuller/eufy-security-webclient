@@ -79,6 +79,7 @@ liveButton.addEventListener('click', () => {
         videoStopStream();
         videoHideError();
     } else if (liveReady && liveCamera.value) {
+        liveVideo.muted = liveVideo.defaultMuted;
         videoStartStream(location.origin, liveCamera.value, false);
     }
 });
