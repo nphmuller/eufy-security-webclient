@@ -475,6 +475,12 @@ function eufyParseEventMessage(message) {
             }
             break;
 
+        case 'stream_time_limit':
+            if ((isStreaming || reconnectTimeout) && message.event.serialNumber === uiGetDeviceSn()) {
+                videoOnTimeLimit();
+            }
+            break;
+
         default:
             debugConsoleLog('Unknown event type:', message.event.event);
             break;

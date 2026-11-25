@@ -63,6 +63,7 @@ function liveConnect() {
         if (isStreaming && event.serialNumber === liveCamera.value) {
             if (event.event === 'livestream start failed') videoOnStartFailed(event.message);
             if (event.event === 'stream_stopped_by_station') videoOnStartFailed('The camera stopped the stream. Try starting it again.');
+            if (event.event === 'stream_time_limit') videoOnTimeLimit();
         }
     });
     socket.addEventListener('close', () => {

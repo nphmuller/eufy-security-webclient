@@ -30,6 +30,7 @@ let loginState = { status: 'idle' };        // Login progress: idle | captcha | 
 let wsEvnentHandlersRegistered = false;     // Flag to prevent duplicate handler registration
 let currentStreamingSN = null;              // Serial number of currently streaming device
 let activeStream = null;                    // Live stream consumer of the current device
+let pendingStreamStart = null;              // Identity of the in-flight camera.live() request
 const stations = new Set();                 // Serial numbers of discovered stations
 const devices = new Map();                  // Serial number -> Device (strong refs, the SDK only holds them weakly)
 const p2pPaths = new Map();                 // Station serial -> { path: direct|relay|closed|timeout, detail, since }
@@ -580,31 +581,40 @@ async function startStreamForDevice(serialNumber) {
     }
 
     // Already streaming this device
-    if (activeStream && currentStreamingSN === serialNumber) {
+    if ((activeStream || pendingStreamStart) && currentStreamingSN === serialNumber) {
         utils.log(`ℹ️ Livestream for device ${serialNumber} is already active.`, 'warn');
         return;
     }
 
     // Only one stream at a time (single transcoder)
-    if (activeStream) stopActiveStream();
-    currentStreamingSN = null;
+    stopActiveStream();
 
     utils.log(`📲 Starting livestream for device: ${serialNumber}`, 'debug');
-    const device = devices.get(serialNumber) || await eufyClient.getDevice(serialNumber);
-    const camera = device.camera && device.camera();
-    if (!camera || !camera.live) {
-        failStreamStart(serialNumber, 'This device has no live stream.');
-        return;
-    }
-
     currentStreamingSN = serialNumber;
+    const start = pendingStreamStart = {};
     let stream;
     try {
+        const device = devices.get(serialNumber) || await eufyClient.getDevice(serialNumber);
+        if (pendingStreamStart !== start) return;
+        const camera = device.camera && device.camera();
+        if (!camera || !camera.live) {
+            pendingStreamStart = null;
+            failStreamStart(serialNumber, 'This device has no live stream.');
+            return;
+        }
         stream = await camera.live();
     } catch (error) {
-        failStreamStart(serialNumber, describeStreamStartError(error), error);
+        if (pendingStreamStart === start) {
+            pendingStreamStart = null;
+            failStreamStart(serialNumber, describeStreamStartError(error), error);
+        }
         return;
     }
+    if (pendingStreamStart !== start) {
+        stopStreamConsumer(stream);
+        return;
+    }
+    pendingStreamStart = null;
     activeStream = stream;
 
     // Coded video configuration (changes mid-session, authority for geometry)
@@ -718,14 +728,17 @@ function failStreamStart(serialNumber, message, error) {
  * Detach and forget the active livestream consumer
  */
 function stopActiveStream() {
+    pendingStreamStart = null;
     const stream = activeStream;
     activeStream = null;
-    if (stream) {
-        try {
-            stream.stop();
-        } catch (error) {
-            utils.log(`❌ Error stopping livestream: ${error.message}`, 'error');
-        }
+    if (stream) stopStreamConsumer(stream);
+}
+
+function stopStreamConsumer(stream) {
+    try {
+        stream.stop();
+    } catch (error) {
+        utils.log(`❌ Error stopping livestream: ${error.message}`, 'error');
     }
 }
 
@@ -735,7 +748,7 @@ function stopActiveStream() {
  * @param {string} serialNumber - Device serial number to stop streaming
  */
 async function stopStreamForDevice(serialNumber) {
-    if (!activeStream || currentStreamingSN !== serialNumber) {
+    if ((!activeStream && !pendingStreamStart) || currentStreamingSN !== serialNumber) {
         utils.log(`ℹ️ Livestream for device ${serialNumber} is not active, no stop required.`, 'warn');
         return;
     }

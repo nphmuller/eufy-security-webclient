@@ -22,9 +22,42 @@ const STATIC_DIR = process.env.STATIC_DIR || path.join(require.main.path, 'publi
 
 const app = express();
 const PORT = 3001;
+const MAX_STREAM_DURATION_MS = 15 * 60 * 1000;
 
 // Currently active streaming device (only one device can stream at a time)
 let currentDevice = null;
+let streamLimitTimer = null;
+let streamIdleTimer = null;
+let deviceReleaseTimer = null;
+
+function stopStreaming(serialNumber) {
+    clearTimeout(streamLimitTimer);
+    streamLimitTimer = null;
+    eufy.stopStreamForDevice(serialNumber);
+    transcode.stopTranscoding();
+}
+
+function releaseDevice() {
+    utils.log(`📹 Device released: ${currentDevice}`, 'info');
+    currentDevice = null;
+}
+
+function expireStream(serialNumber) {
+    clearTimeout(streamIdleTimer);
+    streamIdleTimer = null;
+    utils.log(`⏱️ Livestream for ${serialNumber} reached the 15-minute limit`, 'info');
+    wsApi.wsBroadcast({
+        type: 'event',
+        event: { source: 'system', event: 'stream_time_limit', serialNumber }
+    });
+
+    for (const client of utils.getActiveStreamClients()) {
+        client.cleanup();
+        client.response.end();
+    }
+    stopStreaming(serialNumber);
+    releaseDevice();
+}
 
 /**
  * Initialize REST API Server
@@ -142,9 +175,14 @@ function initRestServer() {
             utils.log(`📹 Device set: ${currentDevice}`, 'info');
         }
 
-        // Initialize Eufy stream and transcoding for this device
-        eufy.startStreamForDevice(requestedDevice);
-        transcode.currentDevice = requestedDevice;
+        clearTimeout(streamIdleTimer);
+        streamIdleTimer = null;
+        clearTimeout(deviceReleaseTimer);
+        deviceReleaseTimer = null;
+        // Shared deadline: new viewers and quick reconnects do not extend the stream.
+        if (streamLimitTimer === null) {
+            streamLimitTimer = setTimeout(() => expireStream(requestedDevice), MAX_STREAM_DURATION_MS);
+        }
 
         // Create client stream object to track this connection
         const clientStream = {
@@ -152,7 +190,14 @@ function initRestServer() {
             active: true,
             device: requestedDevice,
             hasReceivedInit: false,
-            listenerRegistered: false
+            outputStream: null,
+            cleanup: () => {
+                clearInterval(waitForStream);
+                clearTimeout(startupTimer);
+                clientStream.outputStream?.removeListener('data', streamDataHandler);
+                clientStream.active = false;
+                utils.removeActiveStreamClient(clientStream);
+            }
         };
         utils.addActiveStreamClient(clientStream);
 
@@ -181,9 +226,9 @@ function initRestServer() {
             const outputStream = transcode.getOutputStream;
             if (outputStream && transcode.isTranscoding) {
                 // Register stream listener (only once per client)
-                if (!clientStream.listenerRegistered) {
+                if (!clientStream.outputStream) {
                     outputStream.on('data', streamDataHandler);
-                    clientStream.listenerRegistered = true;
+                    clientStream.outputStream = outputStream;
                     utils.log(`🎧 Registered stream listener for client`, 'debug');
                 }
 
@@ -207,7 +252,7 @@ function initRestServer() {
         }, 100);
 
         // Timeout after 10 seconds if stream doesn't start
-        setTimeout(() => {
+        const startupTimer = setTimeout(() => {
             clearInterval(waitForStream);
             if (!res.headersSent) {
                 res.status(503).send('Stream not ready');
@@ -218,45 +263,28 @@ function initRestServer() {
          * Handle client disconnection
          * Cleanup resources and stop streaming if no clients remain
          */
-        req.on('close', () => {
-            clearInterval(waitForStream);
-
-            // Cleanup stream listener to prevent memory leaks
-            const outputStream = transcode.getOutputStream;
-            if (clientStream.listenerRegistered && outputStream) {
-                outputStream.removeListener('data', streamDataHandler);
-            }
-
-            // Remove this client from active clients list
-            for (let client of utils.getActiveStreamClients()) {
-                if (client.response === res) {
-                    client.active = false;
-                    utils.removeActiveStreamClient(client);
-                    break;
-                }
-            }
-
+        res.once('close', () => {
+            if (!utils.getActiveStreamClients().has(clientStream)) return;
+            clientStream.cleanup();
             utils.log(`👁️ Stream client lost (${utils.getActiveStreamClients().size} active)`, 'info');
 
-            // Stop streaming if all clients have disconnected (with grace period)
+            // Give reconnecting viewers 5 seconds before stopping the camera.
             if (utils.getActiveStreamClients().size === 0) {
-                // Wait 5 seconds before stopping (allows quick reconnections)
-                setTimeout(() => {
-                    if (utils.getActiveStreamClients().size === 0) {
-                        eufy.stopStreamForDevice(requestedDevice);
-                        transcode.stopTranscoding();
-
-                        // Release device after additional 2 second delay
-                        setTimeout(() => {
-                            if (utils.getActiveStreamClients().size === 0) {
-                                utils.log(`📹 Device released: ${currentDevice}`, 'info');
-                                currentDevice = null;
-                            }
-                        }, 2000);
-                    }
+                streamIdleTimer = setTimeout(() => {
+                    streamIdleTimer = null;
+                    stopStreaming(requestedDevice);
+                    // Release device after an additional 2 second delay.
+                    deviceReleaseTimer = setTimeout(() => {
+                        deviceReleaseTimer = null;
+                        releaseDevice();
+                    }, 2000);
                 }, 5000);
             }
         });
+
+        // Register the viewer before starting so startup failures can close the response.
+        transcode.currentDevice = requestedDevice;
+        eufy.startStreamForDevice(requestedDevice);
     });
 
     /**

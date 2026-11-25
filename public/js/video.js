@@ -68,6 +68,11 @@ function videoOnStartFailed(message) {
     videoShowError(message || 'Live stream could not be started');
 }
 
+function videoOnTimeLimit() {
+    videoStopStream();
+    videoShowError('Live video stopped after 15 minutes. Start it again to reconnect.');
+}
+
 /**
  * Hide Video Error
  * Removes error message overlay from video player
